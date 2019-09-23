@@ -10,8 +10,6 @@ import (
 	_http "net/http"
 	_os "os"
 	_signal "os/signal"
-	_regex "regexp"
-	_strings "strings"
 	_time "time"
 
 	_snappy "github.com/golang/snappy"
@@ -20,11 +18,9 @@ import (
 	_yaml "gopkg.in/yaml.v2"
 )
 
-var fHost string
-var fPort string
-var fPath string
-
-var pattern *_regex.Regexp
+var fSourceHostPort string
+var fDestinationHostPort string
+var fConfigurationPath string
 
 type RetentionPolicy struct {
 	Duration _time.Duration `yaml:"duration"`
@@ -34,28 +30,27 @@ type RetentionPolicy struct {
 
 type ProxyDefault struct {
 	Policy   string         `yaml:"policy"`
-	Pattern  string         `yaml:"pattern"`
 	Scheme   string         `yaml:"scheme"`
 	Step     _time.Duration `yaml:"step"`
 	Duration _time.Duration `yaml:"duration"`
 }
 
 type ProxyConfiguration struct {
-	Policies []RetentionPolicy `yaml:"policies,flow"`
+	Policies []RetentionPolicy `yaml:"policies"`
 	Default  ProxyDefault      `yaml:"default"`
 }
 
 var configuration ProxyConfiguration
 
 func init() {
-	_flag.StringVar(&fHost, "host", "localhost", "host name to target")
-	_flag.StringVar(&fPort, "port", "8086", "port to target")
-	_flag.StringVar(&fPath, "config", "", "configuration file path")
+	_flag.StringVar(&fSourceHostPort, "source", "localhost:3030", "source host:port to expose")
+	_flag.StringVar(&fDestinationHostPort, "destination", "localhost:8086", "destination host:port to send traffic")
+	_flag.StringVar(&fConfigurationPath, "config", "", "configuration file path")
 	_flag.Parse()
 }
 
 func getProxyAddress() string {
-	return _strings.Join([]string{fHost, fPort}, ":")
+	return fDestinationHostPort
 }
 
 type PolicyScore struct {
@@ -63,22 +58,14 @@ type PolicyScore struct {
 	Score      _time.Duration
 }
 
-func absD(d _time.Duration) _time.Duration {
-	if d < _time.Duration(0) {
-		return -d
-	}
-
-	return d
-}
-
 func halfD(d _time.Duration) _time.Duration {
 	return d / 2
 }
 
 func getPolicyForInterval(interval _time.Duration) RetentionPolicy {
-
 	policies := make([]PolicyScore, 0)
 	maximum := _time.Duration(0)
+
 	for _, policy := range configuration.Policies {
 		score := policy.Duration - interval
 		if score < -halfD(policy.Duration) {
@@ -129,7 +116,7 @@ func proxyRequestFor(request *_http.Request) (*_http.Response, error) {
 
 func respondWith(response *_http.Response, writer _http.ResponseWriter) {
 	writer.WriteHeader(response.StatusCode)
-	_io.Copy(writer, response.Body)
+	_, _ = _io.Copy(writer, response.Body)
 }
 
 func max(first _time.Duration, second _time.Duration) _time.Duration {
@@ -141,21 +128,19 @@ func max(first _time.Duration, second _time.Duration) _time.Duration {
 }
 
 func getReadRequest(request *_http.Request) *_prompb.ReadRequest {
-
 	buffer := _bufio.NewReader(request.Body)
 	compressed, _ := _ioutil.ReadAll(buffer)
-	request.Body.Close()
+	_ = request.Body.Close()
 
 	bytes, _ := _snappy.Decode(nil, compressed)
 
 	rreq := &_prompb.ReadRequest{}
-	rreq.Unmarshal(bytes)
+	_ = rreq.Unmarshal(bytes)
 
 	return rreq
 }
 
 func encodeReadRequest(readRequest *_prompb.ReadRequest) []byte {
-
 	bytes, _ := readRequest.Marshal()
 	compressed := _snappy.Encode(nil, bytes)
 	return compressed
@@ -204,7 +189,9 @@ func proxyRequestHandler(response _http.ResponseWriter, request *_http.Request) 
 	proxyResponse, e := proxyRequestFor(request)
 	if e != nil {
 		println(e.Error())
+		return
 	}
+
 	defer proxyResponse.Body.Close()
 
 	println(_format.Sprintf("[%d] %s %s", proxyResponse.StatusCode, proxyResponse.Request.Method, proxyResponse.Request.URL.String()))
@@ -213,7 +200,7 @@ func proxyRequestHandler(response _http.ResponseWriter, request *_http.Request) 
 
 func main() {
 
-	file, e := _os.Open(fPath)
+	file, e := _os.Open(fConfigurationPath)
 	if e != nil {
 		println(e.Error())
 		return
@@ -231,13 +218,11 @@ func main() {
 		return
 	}
 
-	pattern, _ = _regex.Compile(configuration.Default.Pattern)
-
 	mux := _http.NewServeMux()
 	mux.HandleFunc("/", proxyRequestHandler)
 
-	println("listening on :3030")
-	_http.ListenAndServe(":3030", mux)
+	println("listening on ", fSourceHostPort)
+	_ = _http.ListenAndServe(fSourceHostPort, mux)
 
 	signals := make(chan _os.Signal)
 	_signal.Notify(signals, _os.Interrupt)

@@ -1,0 +1,28 @@
+name: InfluxProxy - Release
+on:
+  push:
+    tags: ['v[0-9]*']
+jobs:
+  build:
+    name: Container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: Tag
+        id: tag
+        uses: ./.github/actions/tag
+        with:
+          ref: "${{ github.ref }}"
+          hash: "${{ github.sha }}"
+      - name: Build
+        uses: actions/docker/cli@master
+        with:
+          args: "build -t ${{ github.repository }}:${{ steps.tag.outputs.tag }} -f .docker/Dockerfile ."
+      - name: Login DockerHub
+        uses: actions/docker/cli@master
+        with:
+          args: "login -u ${{ secrets.DOCKERHUB_USERNAME }} -p ${{ secrets.DOCKERHUB_PASSWORD }}"
+      - name: Push DockerHub
+        uses: actions/docker/cli@master
+        with:
+          args: "push ${{ github.repository }}:${{ steps.tag.outputs.tag }}"

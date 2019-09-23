@@ -1,0 +1,43 @@
+name: InfluxProxy - Build
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review]
+jobs:
+  build:
+    name: Container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: Tag
+        id: tag
+        uses: ./.github/actions/tag
+        with:
+          ref: "${{ github.ref }}"
+          hash: "${{ github.sha }}"
+      - name: Build
+        uses: actions/docker/cli@master
+        with:
+          args: "build -t docker.pkg.github.com/${{ github.repository }}/influxproxy:${{ steps.tag.outputs.tag }} -f .docker/Dockerfile ."
+      - name: Login GitHub
+        uses: actions/docker/cli@master
+        with:
+          args: "login docker.pkg.github.com -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_TOKEN }}"
+      - name: Push GitHub
+        uses: actions/docker/cli@master
+        with:
+          args: "push docker.pkg.github.com/${{ github.repository }}/influxproxy:${{ steps.tag.outputs.tag }}"
+      - name: Login DockerHub
+        uses: actions/docker/cli@master
+        with:
+          args: "login -u ${{ secrets.DOCKERHUB_BUILD_USERNAME }} -p ${{ secrets.DOCKERHUB_BUILD_PASSWORD }}"
+      - name: Tag DockerHub
+        uses: actions/docker/cli@master
+        with:
+          args: "tag docker.pkg.github.com/${{ github.repository }}/influxproxy:${{ steps.tag.outputs.tag }} ${{ secrets.DOCKERHUB_BUILD_USERNAME }}/influxproxy:${{ steps.tag.outputs.tag }}"
+      - name: Push DockerHub
+        uses: actions/docker/cli@master
+        with:
+          args: "push ${{ secrets.DOCKERHUB_BUILD_USERNAME }}/influxproxy:${{ steps.tag.outputs.tag }}"

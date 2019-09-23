@@ -1,0 +1,18 @@
+name: 'Version Tag from Github Ref/SHA'
+description: 'Expose a version number for the current github ref/SHA'
+inputs:
+  hash:
+    description: 'SHA hash of the current ref'
+    required: true
+  ref:
+    description: 'ref of the current repository'
+    required: true
+outputs:
+  version:
+    description: 'version number of the current ref/hash'
+  tag:
+    description: 'tag name of the current version'
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+
